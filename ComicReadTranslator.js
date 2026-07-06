@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         漫译助手
 // @namespace    https://github.com/liuzhijie443/comic-read-translator
-// @version      2.1.3-2026-06-20
+// @version      2.1.5-2026-07-07
 // @description  图片漫画一键翻译，适配 ComicRead 阅读模式支持自动翻译与翻译缓存。
 // @author       k452b
 // @match        *://*/*
@@ -73,7 +73,7 @@
     // 文字底板圆角比例，值越大圆角越接近胶囊
     textBackgroundRadiusRatio: 0.15,
     // 每行文本的最小高度，避免过矮导致字号和排版过小
-    textMinBoxHeight: 22,
+    textMinBoxHeight: 20,
     // 自动合并后的多行文本行距倍率
     mergedTextLineHeightRatio: 1.35,
     // 不同字号档位的最大字体大小，避免超大文本框把字号放得过大
@@ -84,9 +84,11 @@
     // 输出图片格式，默认 PNG 以减少文字边缘损失
     outputMimeType: "image/png",
     // 允许处理的最小图片边长，过小的图会被跳过
-    minImageSize: 150, // 提高最小图片尺寸，避免小图片显示图标
+    minImageSize: 200, // 提高最小图片尺寸，避免小图片显示图标
     // 允许处理的最小图片面积，过小的图会被跳过
     minImageArea: 15000, // 添加最小面积检测（宽*高）
+    // 挂载翻译按钮所需的最小渲染尺寸，避免缩略图等小图也显示图标
+    minRenderedSize: 200,
     // small / medium / large 三类文本的缩放系数
     sizeMapping: { small: 1.0, medium: 1.1, large: 1.2 },
     // 按钮主色渐变
@@ -3106,11 +3108,52 @@
 
   async function requestTranslationCompletion(requestBody, requestMeta = {}) {
     const requestUrl = `${CONFIG.apiBaseUrl}/chat/completions`;
+    const requestTimeout = 30000;
     const headers = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${CONFIG.apiKey}`,
     };
     const body = JSON.stringify(requestBody);
+
+    // 直接使用GM_xmlhttpRequest请求翻译
+
+    const fallbackUrl = buildParallelRequestUrl(requestUrl);
+    const response = await new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: fallbackUrl,
+        timeout: requestTimeout,
+        headers,
+        data: body,
+        onload: resolve,
+        onerror: reject,
+        ontimeout: () => {
+          const error = new Error(
+            `GM_xmlhttpRequest 请求超时: ${requestTimeout}ms`,
+          );
+          error.code = "ETIMEDOUT";
+          reject(error);
+        },
+      });
+    });
+    if (response.status >= 400) {
+      const error = new Error(`GM_xmlhttpRequest 请求失败: ${response.status}`);
+      error.status = response.status;
+      error.responseText = response.responseText;
+      throw error;
+    }
+    logInfo("GM_xmlhttpRequest 翻译请求成功", {
+      ...requestMeta,
+      status: response.status,
+      fallbackUrl,
+    });
+    return {
+      responseText: response.responseText,
+      transport: "gm_xhr",
+      status: response.status,
+    };
+
+    // 下面是未删除的旧代码
 
     try {
       logInfo("尝试使用 fetch 发送翻译请求", {
@@ -3824,6 +3867,15 @@
     // 检查是否在当前网站隐藏图标
     if (isHideIcon()) return;
     if (!isQualifiedImage(img)) return;
+    // 渲染尺寸过小（如缩略图/图标）时不挂载翻译按钮
+    {
+      const rect = img.getBoundingClientRect();
+      if (
+        rect.width < CONFIG.minRenderedSize ||
+        rect.height < CONFIG.minRenderedSize
+      )
+        return;
+    }
 
     processedImages.add(img);
     const wrapper = document.createElement("div");
