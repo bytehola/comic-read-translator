@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         漫译助手
 // @namespace    https://github.com/liuzhijie443/comic-read-translator
-// @version      2.1.5-2026-07-07
+// @version      2.1.6-2026-08-03
 // @description  图片漫画一键翻译，适配 ComicRead 阅读模式支持自动翻译与翻译缓存。
 // @author       k452b
 // @match        *://*/*
@@ -2753,7 +2753,9 @@
     logInfo("API 原始输出", text);
     try {
       const raw = JSON.parse(text);
-      let content = raw.choices[0].message.content;
+      // 部分模型把结果放在 reasoning_content 而 content 为空，需回退
+      const message = raw.choices[0].message;
+      let content = message.content || message.reasoning_content || "";
       logInfo("提取的 content", content);
 
       // 阶段1: 预处理 - 清理 markdown 代码块和常见问题
