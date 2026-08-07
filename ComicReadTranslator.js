@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         漫译助手
 // @namespace    https://github.com/liuzhijie443/comic-read-translator
-// @version      2.1.6-2026-08-03
+// @version      2.1.7-2026-08-07
 // @description  图片漫画一键翻译，适配 ComicRead 阅读模式支持自动翻译与翻译缓存。
 // @author       k452b
 // @match        *://*/*
@@ -19,6 +19,34 @@
 
 (function () {
   "use strict";
+
+  // Cloudflare 拦截/验证页（如 "Just a moment"、/cdn-cgi/ 挑战路径、Turnstile 控件页）
+  // 会与本脚本对 Shadow DOM 的监听冲突，导致验证无法通过。命中时直接退出，
+  // 不安装任何补丁与观察器。
+  function isCloudflareChallengePage() {
+    try {
+      if (location.pathname.startsWith("/cdn-cgi/")) return true;
+      const host = location.hostname;
+      if (
+        host === "challenges.cloudflare.com" ||
+        host === "cloudflareinsights.com"
+      )
+        return true;
+      const title = (document.title || "").trim();
+      if (
+        title &&
+        /just a moment|请稍候|verifying|checking your browser|attention required|un moment|attente|moment, please/i.test(
+          title,
+        )
+      )
+        return true;
+    } catch (_) {
+      // ignore
+    }
+    return false;
+  }
+
+  if (isCloudflareChallengePage()) return;
 
   // ================= [1. 配置参数] =================
   const CONFIG = {
@@ -2612,7 +2640,12 @@
   if (!nativeAttachShadow.__itPatched) {
     const patchedAttachShadow = function (init) {
       const shadowRoot = nativeAttachShadow.call(this, init);
-      observeRoot(shadowRoot);
+      // 仅接管 ComicRead 自身的 closed shadow root 用于图片观测；
+      // 其它 shadow root（如 Cloudflare Turnstile 验证控件）一律走原生、不观测，
+      // 避免向验证控件内部注入观察器与翻译 UI 而干扰验证流程。
+      if (this.id === "comicRead" || this.closest?.("#comicRead")) {
+        observeRoot(shadowRoot);
+      }
       return shadowRoot;
     };
     patchedAttachShadow.__itPatched = true;
